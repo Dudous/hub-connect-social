@@ -8,7 +8,7 @@ import MessageList from "@/components/chat/MessageList";
 import ChatInput from "@/components/chat/ChatInput";
 import { Search } from "lucide-react";
 import { useChat } from "@/hooks/useChat";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "sonner";
 
 interface Conversation {
   id: string;
