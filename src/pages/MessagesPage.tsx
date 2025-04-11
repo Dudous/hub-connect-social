@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +7,8 @@ import { Message } from "@/components/chat/MessageList";
 import MessageList from "@/components/chat/MessageList";
 import ChatInput from "@/components/chat/ChatInput";
 import { Search } from "lucide-react";
+import { useChat } from "@/hooks/useChat";
+import { toast } from "@/components/ui/sonner";
 
 interface Conversation {
   id: string;
@@ -26,7 +27,12 @@ interface Conversation {
   };
 }
 
-// Sample conversations data
+const currentUser = {
+  id: "currentUser",
+  name: "John Doe",
+  username: "johndoe"
+};
+
 const sampleConversations: Conversation[] = [
   {
     id: "conv1",
@@ -78,7 +84,6 @@ const sampleConversations: Conversation[] = [
   },
 ];
 
-// Sample messages for conversation 1
 const sampleMessages: Message[] = [
   {
     id: "msg1",
@@ -133,45 +138,77 @@ const sampleMessages: Message[] = [
 const MessagesPage = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   
-  const currentUserId = "currentUser"; // This would come from auth in a real app
+  const activeConversation = conversations.find(conv => conv.id === selectedConversation);
+  
+  const { 
+    connected,
+    messages, 
+    isTyping,
+    sendMessage,
+    setTyping,
+    fetchConversations
+  } = useChat({
+    conversationId: selectedConversation || "default",
+    userId: currentUser.id,
+    userName: currentUser.name
+  });
   
   useEffect(() => {
-    // Simulate API fetch
-    const timer = setTimeout(() => {
-      setConversations(sampleConversations);
-      setSelectedConversation(sampleConversations[0].id);
-      setMessages(sampleMessages);
-      setLoading(false);
-    }, 1000);
+    const loadConversations = async () => {
+      setLoading(true);
+      
+      try {
+        setConversations(sampleConversations);
+        
+        if (sampleConversations.length > 0) {
+          setSelectedConversation(sampleConversations[0].id);
+        }
+      } catch (error) {
+        console.error("Error loading conversations:", error);
+        toast.error("Failed to load conversations");
+      } finally {
+        setLoading(false);
+      }
+    };
     
-    return () => clearTimeout(timer);
+    loadConversations();
   }, []);
   
   const handleSendMessage = (text: string) => {
-    const newMessage: Message = {
-      id: `msg${messages.length + 1}`,
-      text,
-      senderId: currentUserId,
-      senderName: "John Doe", // This would be the current user's name
-      timestamp: new Date(),
-      isRead: false,
-      isSent: true,
-    };
+    if (!selectedConversation || !activeConversation) return;
     
-    setMessages([...messages, newMessage]);
+    try {
+      sendMessage({
+        text,
+        receiverId: activeConversation.user.id
+      });
+    } catch (error) {
+      console.error("Error sending message:", error);
+      toast.error("Failed to send message");
+    }
   };
   
-  const getActiveConversation = () => {
-    return conversations.find(conv => conv.id === selectedConversation);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const handleTyping = () => {
+    if (!selectedConversation) return;
+    
+    setTyping(true);
+    
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    typingTimeoutRef.current = setTimeout(() => {
+      setTyping(false);
+    }, 2000);
   };
   
   return (
     <AppLayout>
       <div className="bg-white border border-gray-200 rounded-lg shadow-sm h-[calc(100vh-180px)] flex flex-col md:flex-row overflow-hidden">
-        {/* Conversation List */}
         <div className="md:w-80 border-r border-gray-200 flex flex-col">
           <div className="p-3 border-b border-gray-200">
             <div className="relative">
@@ -185,7 +222,6 @@ const MessagesPage = () => {
           
           <div className="overflow-y-auto flex-1">
             {loading ? (
-              // Loading skeleton
               Array(3)
                 .fill(null)
                 .map((_, i) => (
@@ -246,38 +282,50 @@ const MessagesPage = () => {
           </div>
         </div>
         
-        {/* Messages */}
         <div className="flex-1 flex flex-col">
-          {selectedConversation ? (
+          {selectedConversation && activeConversation ? (
             <>
-              {/* Conversation Header */}
               <div className="p-3 border-b border-gray-200 flex items-center gap-3">
                 <Avatar className="h-10 w-10">
-                  <AvatarImage src={getActiveConversation()?.user.avatar} />
+                  <AvatarImage src={activeConversation.user.avatar} />
                   <AvatarFallback>
-                    {getActiveConversation()?.user.name.charAt(0)}
+                    {activeConversation.user.name.charAt(0)}
                   </AvatarFallback>
                 </Avatar>
                 
                 <div>
-                  <p className="font-medium">{getActiveConversation()?.user.name}</p>
+                  <p className="font-medium">{activeConversation.user.name}</p>
                   <p className="text-xs text-gray-500">
-                    {getActiveConversation()?.user.isOnline ? (
+                    {activeConversation.user.isOnline ? (
                       <span className="text-green-500">Online</span>
                     ) : (
                       "Offline"
                     )}
                   </p>
                 </div>
+                
+                {!connected && (
+                  <div className="ml-auto px-2 py-1 text-xs bg-yellow-50 text-yellow-700 rounded">
+                    Reconnecting...
+                  </div>
+                )}
               </div>
               
-              {/* Message List */}
               <div className="flex-1 overflow-y-auto">
-                <MessageList messages={messages} currentUserId={currentUserId} />
+                <MessageList messages={messages} currentUserId={currentUser.id} />
+                
+                {Object.values(isTyping).some(Boolean) && (
+                  <div className="px-4 py-2 text-sm text-gray-500 italic">
+                    Someone is typing...
+                  </div>
+                )}
               </div>
               
-              {/* Message Input */}
-              <ChatInput onSendMessage={handleSendMessage} />
+              <ChatInput 
+                onSendMessage={handleSendMessage} 
+                isLoading={!connected}
+                onTyping={handleTyping}
+              />
             </>
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500">
